@@ -416,6 +416,7 @@
       <div style="padding:0 var(--space-4);display:flex;flex-direction:column;gap:var(--space-2)">
         <button type="button" class="btn btn-primary btn-block" data-action="capture-for" data-book="${book.id}">New entry</button>
         ${!closed ? `<button type="button" class="btn btn-ghost" data-action="go-close" data-book="${book.id}">Close this book</button>` : ""}
+        <button type="button" class="btn btn-ghost" style="color:var(--color-accent-2-700)" data-action="delete-book" data-book="${book.id}">Delete this book</button>
       </div>
     </div>`;
   }
@@ -646,6 +647,17 @@
       saveData(data);
       if (entry.imageId) deleteImageBlob(entry.imageId);
       return render();
+    }
+    if (action === "delete-book") {
+      const book = findBook(el.dataset.book);
+      if (!book) return;
+      if (!confirm(`Delete "${book.title}" and all ${book.entries.length} of its notes? This can't be undone.`)) return;
+      const entryIds = new Set(book.entries.map(x => x.id));
+      data.books = data.books.filter(b => b.id !== book.id);
+      data.links = data.links.filter(l => !entryIds.has(l.aEntryId) && !entryIds.has(l.bEntryId));
+      saveData(data);
+      book.entries.forEach(e => { if (e.imageId) deleteImageBlob(e.imageId); });
+      return go("home");
     }
     if (action === "remove-image") {
       if (pendingImagePreviewUrl) { URL.revokeObjectURL(pendingImagePreviewUrl); pendingImagePreviewUrl = null; }
