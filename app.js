@@ -33,72 +33,76 @@
   }
 
   // ---------- storage ----------
-  function seedData() {
-    return {
-      books: [
-        {
-          id: "b1", title: "The Unbearable Lightness of Being", author: "Milan Kundera",
-          status: "reading", startedAt: "2026-01-14",
-          start: {
-            about: "A novel about several lives in Prague under Soviet occupation, and how much ‘weight’ our choices actually carry.",
-            want: "I want to sit with lightness versus weight in my own decisions — which choices are the irreversible ones.",
-            connect: "Close to something I’ve circled since college — the anxiety of choosing without a rehearsal."
-          },
-          close: null,
-          entries: [
-            { id: "e1", date: "2026-01-16", keep: "We live only once, so we can never compare our choices against alternatives lived out — every decision is a first and only draft.", connection: "I think about this every time I second-guess a decision at work. There’s no control group for my life.", tags: [{ type: "theme", value: "choice & weight" }] },
-            { id: "e2", date: "2026-01-22", keep: "Tomas’s ‘es muss sein’ — the gap between something feeling necessary and something actually being necessary.", connection: "", tags: [{ type: "person", value: "Tomas" }] },
-            { id: "e3", date: "2026-02-03", keep: "The dog, Karenin, whose time is a circle — not Sabina’s line rushing toward betrayal after betrayal.", connection: "Connects to how my grandmother talked about the farm — the year as a wheel, not a ladder.", tags: [{ type: "theme", value: "cyclical time" }] }
-          ]
-        },
-        {
-          id: "b2", title: "How to Do Nothing", author: "Jenny Odell",
-          status: "closed", startedAt: "2025-11-02", closedAt: "2025-11-29",
-          start: {
-            about: "An argument against the attention economy, using bird watching and public space as a way back into presence.",
-            want: "I want language for why I’ve been resenting my phone, and maybe a plan that isn’t just deleting the apps.",
-            connect: "Close to the burnout I hit in my last job, and a season I spent doing almost nothing productive on purpose."
-          },
-          close: {
-            surprised: "I expected a manifesto against technology. Instead it’s mostly about noticing — birds, neighbors, the oak outside her window.",
-            differently: "Twenty minutes outside without my phone before I open a laptop each morning — an experiment, not a rule.",
-            rating: "Slower and stranger than I expected, in a good way."
-          },
-          entries: [
-            { id: "e1", date: "2025-11-05", keep: "Odell’s distinction between withdrawal and refusal — you don’t leave the world, you refuse the terms it’s offered on.", connection: "This reframes the year I took ‘off’ from ambition. I wasn’t checked out, I was refusing a specific deal.", tags: [{ type: "theme", value: "refusal" }] },
-            { id: "e2", date: "2025-11-18", keep: "The bioregionalism chapter — knowing the actual watershed you live in as a form of attention that has nothing to do with productivity.", connection: "Made me realize I couldn’t name the creek two streets from my flat.", tags: [{ type: "place", value: "home watershed" }] }
-          ]
-        },
-        {
-          id: "b3", title: "The Overstory", author: "Richard Powers",
-          status: "reading", startedAt: "2026-08-30",
-          start: {
-            about: "Interlinked stories of people pulled toward trees, building to a collective reckoning with deforestation.",
-            want: "I want to notice trees again — I grew up climbing them and haven’t looked up in years.",
-            connect: "Might connect to the cyclical-time idea from Kundera’s dog."
-          },
-          close: null,
-          entries: [
-            { id: "e1", date: "2026-09-05", keep: "Patricia Westerford’s discovery that trees signal through root networks — a forest behaves like a single slow organism.", connection: "Basically the same shape as the mycelium documentary from years ago, but I hadn’t connected it to trees until now.", tags: [{ type: "theme", value: "networks" }] }
-          ]
-        }
-      ],
-      links: [
-        { id: "l1", aBookId: "b2", aEntryId: "e2", bBookId: "b1", bEntryId: "e3", status: "confirmed" }
-      ]
-    };
-  }
+  function emptyData() { return { books: [], links: [] }; }
   function loadData() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) return JSON.parse(raw);
     } catch (e) { console.warn("Could not read local data, starting fresh.", e); }
-    const seeded = seedData();
-    saveData(seeded);
-    return seeded;
+    const fresh = emptyData();
+    saveData(fresh);
+    return fresh;
   }
   function saveData(data) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  }
+
+  // ---------- images (IndexedDB — localStorage is too small for photos) ----------
+  const IMG_DB_NAME = "commonplace_images", IMG_STORE = "images";
+  function openImgDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(IMG_DB_NAME, 1);
+      req.onupgradeneeded = () => { req.result.createObjectStore(IMG_STORE); };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function saveImageBlob(id, blob) {
+    const db = await openImgDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IMG_STORE, "readwrite");
+      tx.objectStore(IMG_STORE).put(blob, id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  async function loadImageBlob(id) {
+    const db = await openImgDb();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction(IMG_STORE, "readonly").objectStore(IMG_STORE).get(id);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function deleteImageBlob(id) {
+    if (!id) return;
+    const db = await openImgDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IMG_STORE, "readwrite");
+      tx.objectStore(IMG_STORE).delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  // Resize client-side so a phone photo doesn't blow past a sane per-image size.
+  function resizeImageFile(file, maxDim = 1000, quality = 0.72) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) { height = Math.round(height * maxDim / width); width = maxDim; }
+          else { width = Math.round(width * maxDim / height); height = maxDim; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        canvas.toBlob(blob => { URL.revokeObjectURL(url); blob ? resolve(blob) : reject(new Error("resize failed")); }, "image/jpeg", quality);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("could not read image")); };
+      img.src = url;
+    });
   }
 
   let data = loadData();
@@ -221,6 +225,18 @@
     if (ui.pickerOpen) html += viewPicker();
     app.innerHTML = html;
     bind();
+    hydrateImages();
+  }
+
+  // Fill in <img data-image-id> placeholders from IndexedDB after the DOM is in place.
+  function hydrateImages() {
+    app.querySelectorAll("img[data-image-id]").forEach(async img => {
+      const id = img.dataset.imageId;
+      try {
+        const blob = await loadImageBlob(id);
+        if (blob) img.src = URL.createObjectURL(blob);
+      } catch (e) { console.warn("Could not load image", id, e); }
+    });
   }
 
   function go(view, extra = {}) { Object.assign(ui, { view, pickerOpen: false }, extra); render(); }
@@ -323,7 +339,8 @@
             </div>`;
           }).join("")}
         </div>
-        ${filtered.length === 0 ? `<p style="opacity:0.5;font-size:13px;font-style:italic;margin:0 0 var(--space-4)">No books match "${escapeHtml(ui.search)}".</p>` : ""}
+        ${filtered.length === 0 && data.books.length > 0 ? `<p style="opacity:0.5;font-size:13px;font-style:italic;margin:0 0 var(--space-4)">No books match "${escapeHtml(ui.search)}".</p>` : ""}
+        ${data.books.length === 0 ? `<p style="opacity:0.6;font-size:14px;font-style:italic;margin:0 0 var(--space-4)">Nothing here yet. Start your first book below — capture what you want to keep from it as you go.</p>` : ""}
         <button type="button" class="btn btn-secondary btn-block" data-action="go-start">Start a new book</button>
       </div>
     `;
@@ -380,13 +397,20 @@
 
       <div style="padding:0 var(--space-4);display:flex;flex-direction:column;gap:var(--space-6);margin-bottom:var(--space-6)">
         ${book.entries.map(entry => `<div>
-          <div style="font-size:13px;opacity:0.6;margin-bottom:6px">${escapeHtml(formatDate(new Date(entry.date)))}</div>
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-2);margin-bottom:6px">
+            <span style="font-size:13px;opacity:0.6">${escapeHtml(formatDate(new Date(entry.date)))}</span>
+            <span style="display:flex;gap:4px">
+              <button type="button" class="btn btn-ghost btn-icon" style="width:28px;height:28px" aria-label="Edit" data-action="edit-entry" data-book="${book.id}" data-entry="${entry.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>
+              <button type="button" class="btn btn-ghost btn-icon" style="width:28px;height:28px;color:var(--color-accent-2-700)" aria-label="Delete" data-action="delete-entry" data-book="${book.id}" data-entry="${entry.id}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m2 0v13a1 1 0 01-1 1H8a1 1 0 01-1-1V7h10z"/></svg></button>
+            </span>
+          </div>
+          ${entry.imageId ? `<img data-image-id="${entry.imageId}" style="width:100%;max-height:220px;object-fit:cover;border-radius:var(--radius-md);margin-bottom:8px;background:var(--color-divider)">` : ""}
           <p style="margin:0 0 8px;font-size:16px;line-height:1.55">${escapeHtml(entry.keep)}</p>
           ${entry.connection ? `<p style="margin:0 0 8px;padding-left:var(--space-3);font-style:italic;font-size:13px;opacity:0.72;color:var(--color-accent-2-800)">↳ ${escapeHtml(entry.connection)}</p>` : ""}
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             ${entry.tags.map(t => `<span class="tag ${t.type === "theme" ? "tag-outline" : t.type === "person" ? "tag-accent" : "tag-neutral"}">${escapeHtml(t.value)}</span>`).join("")}
           </div>
-        </div>`).join("")}
+        </div>`).join("") || `<p style="opacity:0.5;font-size:13px;font-style:italic">No entries yet.</p>`}
       </div>
 
       <div style="padding:0 var(--space-4);display:flex;flex-direction:column;gap:var(--space-2)">
@@ -397,22 +421,48 @@
   }
 
   let captureTags = [];
+  let editingEntryId = null;      // set when the capture view is editing an existing entry
+  let pendingImageFile = null;    // a newly-picked File awaiting save
+  let pendingImagePreviewUrl = null;
+  let existingImageId = null;     // image already attached to the entry being edited
+  let imageRemoved = false;       // user asked to remove the existing image
+
+  function resetCaptureDraft() {
+    captureTags = []; editingEntryId = null; pendingImageFile = null;
+    pendingImagePreviewUrl = null; existingImageId = null; imageRemoved = false;
+  }
+
+  function imagePickerHtml() {
+    const showRemove = (existingImageId && !imageRemoved) || pendingImagePreviewUrl;
+    return `<div class="field">
+      <label>Photo (optional)</label>
+      <input type="file" accept="image/*" id="f-image" class="input" style="padding:6px">
+      <div id="image-preview" style="margin-top:8px;display:flex;align-items:center;gap:10px">
+        ${pendingImagePreviewUrl ? `<img src="${pendingImagePreviewUrl}" style="width:64px;height:64px;object-fit:cover;border-radius:var(--radius-md)">`
+          : (existingImageId && !imageRemoved ? `<img data-image-id="${existingImageId}" style="width:64px;height:64px;object-fit:cover;border-radius:var(--radius-md);background:var(--color-divider)">` : "")}
+        ${showRemove ? `<button type="button" class="btn btn-ghost" style="padding-inline:0" data-action="remove-image">Remove photo</button>` : ""}
+      </div>
+    </div>`;
+  }
+
   function viewCapture() {
     const book = findBook(ui.bookId);
     if (!book) { go("home"); return ""; }
+    const editing = !!editingEntryId;
+    const entry = editing ? book.entries.find(e => e.id === editingEntryId) : null;
     return `<div>
       <div style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-4) var(--space-4) var(--space-1)">
         <button type="button" class="btn btn-ghost btn-icon" data-action="go-book" data-book="${book.id}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
-        <div><h4 style="margin:0">New entry</h4><p style="margin:2px 0 0;font-size:12px;opacity:0.55">${escapeHtml(book.title)}</p></div>
+        <div><h4 style="margin:0">${editing ? "Edit entry" : "New entry"}</h4><p style="margin:2px 0 0;font-size:12px;opacity:0.55">${escapeHtml(book.title)}</p></div>
       </div>
       <div style="padding:var(--space-3) var(--space-4) var(--space-8);display:flex;flex-direction:column;gap:var(--space-4)">
         <div class="field">
           <label style="font-size:14px;opacity:0.9">What do you want to keep from this?</label>
-          <textarea class="input" rows="5" style="font-size:16px" id="f-keep" placeholder="The idea, line, or scene worth keeping…" autofocus></textarea>
+          <textarea class="input" rows="5" style="font-size:16px" id="f-keep" placeholder="The idea, line, or scene worth keeping…" autofocus>${escapeHtml(entry?.keep ?? "")}</textarea>
         </div>
         <div style="padding-left:var(--space-3)">
           <label style="display:block;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-accent-2-700);margin-bottom:6px">Personal connection</label>
-          <textarea class="input" rows="3" style="font-style:italic;font-size:13px;background:transparent;border-color:var(--color-divider)" id="f-connection" placeholder="Where does this touch something you already know or have lived?"></textarea>
+          <textarea class="input" rows="3" style="font-style:italic;font-size:13px;background:transparent;border-color:var(--color-divider)" id="f-connection" placeholder="Where does this touch something you already know or have lived?">${escapeHtml(entry?.connection ?? "")}</textarea>
         </div>
         <div class="field">
           <label>Tags</label>
@@ -429,7 +479,8 @@
             ${captureTags.map((t, i) => `<span class="tag ${t.type === "theme" ? "tag-outline" : t.type === "person" ? "tag-accent" : "tag-neutral"}" style="display:inline-flex;align-items:center;gap:6px">${escapeHtml(t.value)}<button type="button" data-action="remove-tag" data-index="${i}" style="background:none;border:none;padding:0;cursor:pointer;color:inherit;opacity:0.6;display:flex"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 6l12 12M18 6L6 18"/></svg></button></span>`).join("")}
           </div>
         </div>
-        <button type="button" class="btn btn-primary btn-block" id="save-capture-btn" data-action="save-capture">Save entry</button>
+        ${imagePickerHtml()}
+        <button type="button" class="btn btn-primary btn-block" id="save-capture-btn" data-action="save-capture">${editing ? "Save changes" : "Save entry"}</button>
       </div>
     </div>`;
   }
@@ -535,6 +586,18 @@
       searchInput.focus();
       searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length;
     }
+    const imageInput = document.getElementById("f-image");
+    if (imageInput) {
+      imageInput.addEventListener("change", () => {
+        const file = imageInput.files && imageInput.files[0];
+        if (!file) return;
+        pendingImageFile = file;
+        imageRemoved = false;
+        if (pendingImagePreviewUrl) URL.revokeObjectURL(pendingImagePreviewUrl);
+        pendingImagePreviewUrl = URL.createObjectURL(file);
+        renderCapturePreserving();
+      });
+    }
   }
 
   // Re-render only the search results without losing focus, by re-rendering fully
@@ -560,8 +623,36 @@
 
     if (action === "open-picker") { ui.pickerOpen = true; return render(); }
     if (action === "close-picker") { ui.pickerOpen = false; return render(); }
-    if (action === "pick-book") { captureTags = []; return go("capture", { bookId: el.dataset.book }); }
-    if (action === "capture-for") { captureTags = []; return go("capture", { bookId: el.dataset.book }); }
+    if (action === "pick-book") { resetCaptureDraft(); return go("capture", { bookId: el.dataset.book }); }
+    if (action === "capture-for") { resetCaptureDraft(); return go("capture", { bookId: el.dataset.book }); }
+
+    if (action === "edit-entry") {
+      resetCaptureDraft();
+      const book = findBook(el.dataset.book);
+      const entry = book?.entries.find(x => x.id === el.dataset.entry);
+      if (!entry) return;
+      editingEntryId = entry.id;
+      captureTags = entry.tags.map(t => ({ ...t }));
+      existingImageId = entry.imageId || null;
+      return go("capture", { bookId: book.id });
+    }
+    if (action === "delete-entry") {
+      const book = findBook(el.dataset.book);
+      const entry = book?.entries.find(x => x.id === el.dataset.entry);
+      if (!entry) return;
+      if (!confirm("Delete this entry? This can't be undone.")) return;
+      book.entries = book.entries.filter(x => x.id !== entry.id);
+      data.links = data.links.filter(l => l.aEntryId !== entry.id && l.bEntryId !== entry.id);
+      saveData(data);
+      if (entry.imageId) deleteImageBlob(entry.imageId);
+      return render();
+    }
+    if (action === "remove-image") {
+      if (pendingImagePreviewUrl) { URL.revokeObjectURL(pendingImagePreviewUrl); pendingImagePreviewUrl = null; }
+      pendingImageFile = null;
+      imageRemoved = true;
+      return renderCapturePreserving();
+    }
 
     if (action === "set-tag-type") { ui.tagType = el.dataset.type; return renderCapturePreserving(); }
     if (action === "add-tag") {
@@ -580,11 +671,13 @@
         alert("Both “what to keep” and “personal connection” are required — that's the whole point of this app.");
         return;
       }
-      book.entries.push({ id: uid("e"), date: new Date().toISOString().slice(0, 10), keep, connection, tags: captureTags.slice() });
-      saveData(data);
-      captureTags = [];
-      ui.resurfaceDismissed = false;
-      return go("bookDetail", { bookId: book.id });
+      const btn = document.getElementById("save-capture-btn");
+      btn.disabled = true; btn.textContent = "Saving…";
+      saveCaptureAsync(book, keep, connection).catch(err => {
+        console.error(err);
+        alert("Couldn't save the photo — the note itself is safe, try re-adding the photo.");
+      });
+      return;
     }
 
     if (action === "submit-start") {
@@ -616,6 +709,32 @@
     if (action === "set-conn-tab") { ui.connTab = el.dataset.tab; return render(); }
     if (action === "confirm-link") { decideLink(el.dataset.a, el.dataset.b, el.dataset.abook, el.dataset.bbook, "confirmed"); return render(); }
     if (action === "reject-link") { decideLink(el.dataset.a, el.dataset.b, el.dataset.abook, el.dataset.bbook, "rejected"); return render(); }
+  }
+
+  async function saveCaptureAsync(book, keep, connection) {
+    let imageId = (existingImageId && !imageRemoved) ? existingImageId : null;
+    if (pendingImageFile) {
+      const resized = await resizeImageFile(pendingImageFile);
+      const newId = uid("img");
+      await saveImageBlob(newId, resized);
+      if (existingImageId) await deleteImageBlob(existingImageId); // replacing an existing photo
+      imageId = newId;
+    } else if (imageRemoved && existingImageId) {
+      await deleteImageBlob(existingImageId);
+      imageId = null;
+    }
+
+    if (editingEntryId) {
+      const entry = book.entries.find(e => e.id === editingEntryId);
+      entry.keep = keep; entry.connection = connection; entry.tags = captureTags.slice(); entry.imageId = imageId;
+    } else {
+      book.entries.push({ id: uid("e"), date: new Date().toISOString().slice(0, 10), keep, connection, tags: captureTags.slice(), imageId });
+    }
+    saveData(data);
+    if (pendingImagePreviewUrl) URL.revokeObjectURL(pendingImagePreviewUrl);
+    resetCaptureDraft();
+    ui.resurfaceDismissed = false;
+    go("bookDetail", { bookId: book.id });
   }
 
   // Re-render the capture view while preserving whatever the user has typed so far.
