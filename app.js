@@ -5,6 +5,47 @@
   "use strict";
 
   const STORAGE_KEY = "commonplace_data_v1";
+
+  // Books get pre-reading prediction prompts (you're about to spend hours on this).
+  // Podcasts/articles are usually consumed in one sitting before you log them at all,
+  // so their prompts are reflective ("what stood out") rather than predictive.
+  const TYPE_CONFIG = {
+    book: {
+      label: "Book", newLabel: "New book", verb: "Reading", doneVerb: "Closed",
+      authorLabel: "Author", authorPlaceholder: "Author", showLink: false,
+      startPrompts: {
+        about: "What do you think this book is about?",
+        want: "What do you want to get out of it?",
+        connect: "What have you already read or lived that this might connect to?"
+      },
+      thenLabel: "Then — your prediction", startedPrefix: "Started thinking:",
+      beginCta: "Begin reading", closeCta: "Close this book", closeHeader: "Close book"
+    },
+    podcast: {
+      label: "Podcast", newLabel: "New podcast", verb: "Listening", doneVerb: "Done",
+      authorLabel: "Host / creator", authorPlaceholder: "Host or creator", showLink: true,
+      startPrompts: {
+        about: "What stood out to you?",
+        want: "What do you want to remember from it?",
+        connect: "What have you already read or lived that this might connect to?"
+      },
+      thenLabel: "Then — your first reaction", startedPrefix: "First reaction:",
+      beginCta: "Add podcast", closeCta: "Mark as finished", closeHeader: "Mark as finished"
+    },
+    article: {
+      label: "Article / paper", newLabel: "New article", verb: "Reading", doneVerb: "Done",
+      authorLabel: "Author", authorPlaceholder: "Author", showLink: true,
+      startPrompts: {
+        about: "What stood out to you?",
+        want: "What do you want to remember from it?",
+        connect: "What have you already read or lived that this might connect to?"
+      },
+      thenLabel: "Then — your first reaction", startedPrefix: "First reaction:",
+      beginCta: "Add article", closeCta: "Mark as finished", closeHeader: "Mark as finished"
+    }
+  };
+  function typeConfig(book) { return TYPE_CONFIG[book?.type] || TYPE_CONFIG.book; }
+
   const STOPWORDS = new Set("a an the and or but of to in on at for with is are was were be been being this that these those i you he she it we they my your his her its our their as not no so if than then just very much more most one two first last also into about over under again out up down".split(" "));
 
   // ---------- utils ----------
@@ -106,7 +147,7 @@
   }
 
   let data = loadData();
-  const ui = { view: "home", bookId: null, connTab: "map", pickerOpen: false, resurfaceDismissed: false, quickAddOpen: false, search: "", tagType: "theme", resurfaceKey: null };
+  const ui = { view: "home", bookId: null, connTab: "map", pickerOpen: false, resurfaceDismissed: false, quickAddOpen: false, search: "", tagType: "theme", resurfaceKey: null, startType: "book" };
 
   // ---------- data helpers ----------
   function findBook(id) { return data.books.find(b => b.id === id); }
@@ -260,11 +301,11 @@
   }
 
   function viewPicker() {
-    const rows = data.books.map(b => `<button type="button" class="btn btn-secondary btn-block" style="justify-content:flex-start" data-action="pick-book" data-book="${b.id}">${escapeHtml(b.title)}</button>`).join("");
+    const rows = data.books.map(b => `<button type="button" class="btn btn-secondary btn-block" style="justify-content:flex-start" data-action="pick-book" data-book="${b.id}">${escapeHtml(b.title)} <span style="opacity:0.5;font-weight:400;margin-left:auto">${typeConfig(b).label}</span></button>`).join("");
     return `<div class="dialog-backdrop" data-action="close-picker">
       <div class="dialog" onclick="event.stopPropagation()">
         <div style="display:flex;align-items:center;justify-content:space-between">
-          <div style="font-family:var(--font-heading);font-weight:600;font-size:20px">New entry — which book?</div>
+          <div style="font-family:var(--font-heading);font-weight:600;font-size:20px">New entry — which one?</div>
           <button type="button" class="btn btn-ghost btn-icon" data-action="close-picker">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
           </button>
@@ -297,7 +338,7 @@
         <div style="height:1px;background:var(--color-text);margin-top:2px"></div>
         <div style="display:flex;justify-content:space-between;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;opacity:0.55;padding:5px 0 var(--space-2)">
           <span>${formatDate(new Date()).toUpperCase()}</span>
-          <span>${data.books.length} BOOKS · ${totalNotes} NOTES</span>
+          <span>${data.books.length} ${data.books.length === 1 ? "SOURCE" : "SOURCES"} · ${totalNotes} NOTES</span>
         </div>
       </div>
 
@@ -322,15 +363,16 @@
         <div class="field" style="margin-bottom:var(--space-4)">
           <div style="position:relative">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);opacity:0.5"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.3-4.3"/></svg>
-            <input class="input" style="padding-left:32px" placeholder="Search books" id="search-input" value="${escapeHtml(ui.search)}">
+            <input class="input" style="padding-left:32px" placeholder="Search your library" id="search-input" value="${escapeHtml(ui.search)}">
           </div>
         </div>
         <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--space-3);margin-bottom:var(--space-4)">
           ${filtered.map(book => {
             const latest = book.entries[book.entries.length - 1];
+            const tc = typeConfig(book);
             return `<div class="card" style="cursor:pointer" data-action="open-book" data-book="${book.id}">
               <div style="display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-2)">
-                <span class="card-kicker">${book.status === "reading" ? "READING" : "CLOSED"}</span>
+                <span class="card-kicker">${(book.status === "reading" ? tc.verb : tc.doneVerb).toUpperCase()}</span>
                 <span style="font-size:11px;opacity:0.55">${book.entries.length} note${book.entries.length === 1 ? "" : "s"}</span>
               </div>
               <div class="card-title">${escapeHtml(book.title)}</div>
@@ -340,33 +382,55 @@
           }).join("")}
         </div>
         ${filtered.length === 0 && data.books.length > 0 ? `<p style="opacity:0.5;font-size:13px;font-style:italic;margin:0 0 var(--space-4)">No books match "${escapeHtml(ui.search)}".</p>` : ""}
-        ${data.books.length === 0 ? `<p style="opacity:0.6;font-size:14px;font-style:italic;margin:0 0 var(--space-4)">Nothing here yet. Start your first book below — capture what you want to keep from it as you go.</p>` : ""}
-        <button type="button" class="btn btn-secondary btn-block" data-action="go-start">Start a new book</button>
+        ${data.books.length === 0 ? `<p style="opacity:0.6;font-size:14px;font-style:italic;margin:0 0 var(--space-4)">Nothing here yet. Add your first book, podcast, or article below — capture what you want to keep from it as you go.</p>` : ""}
+        <button type="button" class="btn btn-secondary btn-block" data-action="go-start">Add a book, podcast, or article</button>
       </div>
     `;
   }
 
   function viewStartBook() {
+    const tc = TYPE_CONFIG[ui.startType];
     return `<div>
       <div style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-4) var(--space-4) var(--space-2)">
         <button type="button" class="btn btn-ghost btn-icon" data-action="go-home"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
-        <h4 style="margin:0">New book</h4>
+        <h4 style="margin:0">${tc.newLabel}</h4>
       </div>
       <div style="padding:var(--space-2) var(--space-4) var(--space-8);display:flex;flex-direction:column;gap:var(--space-4)">
-        <div class="field"><label>Title</label><input class="input" id="f-title" placeholder="Book title"></div>
-        <div class="field"><label>Author</label><input class="input" id="f-author" placeholder="Author"></div>
-        <div class="field"><label>What do you think this book is about?</label><textarea class="input" rows="3" id="f-about"></textarea></div>
-        <div class="field"><label>What do you want to get out of it?</label><textarea class="input" rows="3" id="f-want"></textarea></div>
-        <div class="field"><label>What have you already read or lived that this might connect to?</label><textarea class="input" rows="3" id="f-connect"></textarea></div>
-        <button type="button" class="btn btn-primary btn-block" data-action="submit-start">Begin reading</button>
+        <div class="field">
+          <label>Type</label>
+          <div class="seg">
+            <span class="seg-opt ${ui.startType === "book" ? "active" : ""}" data-action="set-start-type" data-type="book">Book</span>
+            <span class="seg-opt ${ui.startType === "podcast" ? "active" : ""}" data-action="set-start-type" data-type="podcast">Podcast</span>
+            <span class="seg-opt ${ui.startType === "article" ? "active" : ""}" data-action="set-start-type" data-type="article">Article</span>
+          </div>
+        </div>
+        <div class="field"><label>Title</label><input class="input" id="f-title" placeholder="Title"></div>
+        <div class="field"><label>${tc.authorLabel}</label><input class="input" id="f-author" placeholder="${tc.authorPlaceholder}"></div>
+        ${tc.showLink ? `<div class="field"><label>Link</label><input class="input" id="f-link" placeholder="https://…"></div>` : ""}
+        <div class="field"><label>${tc.startPrompts.about}</label><textarea class="input" rows="3" id="f-about"></textarea></div>
+        <div class="field"><label>${tc.startPrompts.want}</label><textarea class="input" rows="3" id="f-want"></textarea></div>
+        <div class="field"><label>${tc.startPrompts.connect}</label><textarea class="input" rows="3" id="f-connect"></textarea></div>
+        <button type="button" class="btn btn-primary btn-block" data-action="submit-start">${tc.beginCta}</button>
       </div>
     </div>`;
+  }
+
+  // Re-render the start-source form on type switch, preserving whatever's already typed.
+  function renderStartPreserving() {
+    const vals = {};
+    ["f-title", "f-author", "f-link", "f-about", "f-want", "f-connect"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) vals[id] = el.value;
+    });
+    render();
+    Object.keys(vals).forEach(id => { const el = document.getElementById(id); if (el) el.value = vals[id]; });
   }
 
   function viewBookDetail() {
     const book = findBook(ui.bookId);
     if (!book) { go("home"); return ""; }
     const closed = book.status === "closed";
+    const tc = typeConfig(book);
     return `<div>
       <div style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-4) var(--space-4) var(--space-1)">
         <button type="button" class="btn btn-ghost btn-icon" data-action="go-home"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
@@ -374,15 +438,16 @@
       </div>
       <div style="padding:0 var(--space-4) var(--space-3)">
         <p style="margin:0 0 var(--space-2);opacity:0.65;font-size:14px">${escapeHtml(book.author)}</p>
+        ${book.link ? `<p style="margin:0 0 var(--space-2);font-size:13px"><a href="${escapeHtml(book.link)}" target="_blank" rel="noopener noreferrer">Open ${tc.label.toLowerCase()} ↗</a></p>` : ""}
         <div style="display:flex;gap:8px;align-items:center">
-          <span class="tag ${closed ? "tag-neutral" : "tag-accent"}">${closed ? "Closed" : "Reading"}</span>
+          <span class="tag ${closed ? "tag-neutral" : "tag-accent"}">${closed ? tc.doneVerb : tc.verb}</span>
           <span style="font-size:12px;opacity:0.5">${closed ? "Closed " + formatDate(new Date(book.closedAt)) : "Started " + formatDate(new Date(book.startedAt))}</span>
         </div>
       </div>
 
       ${closed ? `<div style="padding:0 var(--space-4);margin-bottom:var(--space-6);display:flex;flex-direction:column;gap:var(--space-3)">
         <div>
-          <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;opacity:0.5;margin-bottom:6px">Then — your prediction</div>
+          <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;opacity:0.5;margin-bottom:6px">${tc.thenLabel}</div>
           <p style="margin:0;font-size:13px;font-style:italic;opacity:0.75">${escapeHtml(book.start.about)}</p>
         </div>
         <div>
@@ -392,7 +457,7 @@
           <p style="margin:0;font-size:14px;font-style:italic">"${escapeHtml(book.close.rating)}"</p>
         </div>
       </div>` : `<div style="padding:0 var(--space-4);margin-bottom:var(--space-6)">
-        <p style="margin:0;font-size:13px;font-style:italic;opacity:0.6">Started thinking: "${escapeHtml(book.start.about)}"</p>
+        <p style="margin:0;font-size:13px;font-style:italic;opacity:0.6">${tc.startedPrefix} "${escapeHtml(book.start.about)}"</p>
       </div>`}
 
       <div style="padding:0 var(--space-4);display:flex;flex-direction:column;gap:var(--space-6);margin-bottom:var(--space-6)">
@@ -415,7 +480,7 @@
 
       <div style="padding:0 var(--space-4);display:flex;flex-direction:column;gap:var(--space-2)">
         <button type="button" class="btn btn-primary btn-block" data-action="capture-for" data-book="${book.id}">New entry</button>
-        ${!closed ? `<button type="button" class="btn btn-ghost" data-action="go-close" data-book="${book.id}">Close this book</button>` : ""}
+        ${!closed ? `<button type="button" class="btn btn-ghost" data-action="go-close" data-book="${book.id}">${tc.closeCta}</button>` : ""}
         <button type="button" class="btn btn-ghost" style="color:var(--color-accent-2-700)" data-action="delete-book" data-book="${book.id}">Delete this book</button>
       </div>
     </div>`;
@@ -489,19 +554,20 @@
   function viewCloseBook() {
     const book = findBook(ui.bookId);
     if (!book) { go("home"); return ""; }
+    const tc = typeConfig(book);
     return `<div>
       <div style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-4) var(--space-4) var(--space-1)">
         <button type="button" class="btn btn-ghost btn-icon" data-action="go-book" data-book="${book.id}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
-        <div><h4 style="margin:0">Close book</h4><p style="margin:2px 0 0;font-size:12px;opacity:0.55">${escapeHtml(book.title)}</p></div>
+        <div><h4 style="margin:0">${tc.closeHeader}</h4><p style="margin:2px 0 0;font-size:12px;opacity:0.55">${escapeHtml(book.title)}</p></div>
       </div>
       <div style="padding:var(--space-2) var(--space-4) 0">
-        <p style="font-size:13px;font-style:italic;opacity:0.6;margin:0 0 var(--space-4)">Your prediction, from ${escapeHtml(formatDate(new Date(book.startedAt)))}: "${escapeHtml(book.start.about)}"</p>
+        <p style="font-size:13px;font-style:italic;opacity:0.6;margin:0 0 var(--space-4)">From ${escapeHtml(formatDate(new Date(book.startedAt)))}: "${escapeHtml(book.start.about)}"</p>
       </div>
       <div style="padding:0 var(--space-4) var(--space-8);display:flex;flex-direction:column;gap:var(--space-4)">
         <div class="field"><label>What surprised you?</label><textarea class="input" rows="3" id="f-surprised"></textarea></div>
         <div class="field"><label>What will you do differently?</label><textarea class="input" rows="3" id="f-differently"></textarea></div>
         <div class="field"><label>One line — how was it?</label><input class="input" id="f-rating" placeholder="e.g. Slower than I expected, in a good way"></div>
-        <button type="button" class="btn btn-primary btn-block" data-action="save-close">Close book</button>
+        <button type="button" class="btn btn-primary btn-block" data-action="save-close">${tc.closeCta}</button>
       </div>
     </div>`;
   }
@@ -692,16 +758,23 @@
       return;
     }
 
+    if (action === "set-start-type") { ui.startType = el.dataset.type; return renderStartPreserving(); }
+
     if (action === "submit-start") {
+      const type = ui.startType;
+      const tc = TYPE_CONFIG[type];
       const title = document.getElementById("f-title").value.trim();
       const author = document.getElementById("f-author").value.trim();
+      const link = tc.showLink ? document.getElementById("f-link").value.trim() : "";
       const about = document.getElementById("f-about").value.trim();
       const want = document.getElementById("f-want").value.trim();
       const connect = document.getElementById("f-connect").value.trim();
-      if (!title) { alert("Give the book a title first."); return; }
-      const book = { id: uid("b"), title, author, status: "reading", startedAt: new Date().toISOString().slice(0, 10), start: { about, want, connect }, close: null, entries: [] };
+      if (!title) { alert("Give it a title first."); return; }
+      if (tc.showLink && !link) { alert(`Add a link to the ${tc.label.toLowerCase()} — that's how you'll get back to it later.`); return; }
+      const book = { id: uid("b"), type, title, author, link, status: "reading", startedAt: new Date().toISOString().slice(0, 10), start: { about, want, connect }, close: null, entries: [] };
       data.books.push(book);
       saveData(data);
+      ui.startType = "book";
       return go("bookDetail", { bookId: book.id });
     }
 
